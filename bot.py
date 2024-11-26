@@ -1,17 +1,19 @@
 import asyncio
 import json
 import logging
+import os
 import re
 import sys
 import traceback
 from datetime import datetime, timedelta
 
 import pytz
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message
+from aiogram.types import Message, InlineKeyboardButton, CallbackQuery
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from decouple import config
 from dotenv import load_dotenv
 from pyrogram import Client, filters, idle
@@ -40,6 +42,8 @@ class UserStates(StatesGroup):
     waiting_for_api_id = State()
     waiting_for_api_hash = State()
     waiting_for_code = State()
+    waiting_for_chat_id = State()
+    waiting_for_report_type = State()
 
 
 # Словарь для хранения клиентов Pyrogram
@@ -79,7 +83,7 @@ def save_orders(orders):
 
 
 # Функция для инициализации клиентов Pyrogram
-async def init_account(phone, data):
+async def init_account(phone, data, again=False):
     await disable_active_account(phone)
     try:
         async with Client(
@@ -96,6 +100,27 @@ async def init_account(phone, data):
     except Exception as e:
         print(f"Ошибка при инициализации клиента {phone}: {str(e)}")
         traceback.print_exc()
+
+        # Проверка на AUTH_KEY_UNREGISTERED
+        if "[401 AUTH_KEY_UNREGISTERED]" in str(e):
+            # Удаляем файл сессии
+            try:
+                session_file = f"session_{phone}.session"
+                os.remove(session_file)
+                print(f"Файл сессии {session_file} был удалён.")
+            except FileNotFoundError:
+                print(f"Файл сессии {session_file} не найден для удаления.")
+
+            # Удаляем аккаунт из активных клиентов и оповещаем администратора
+            await disable_active_account(phone)
+
+            accounts = load_accounts()
+            if phone in accounts:
+                del accounts[phone]
+                save_accounts(accounts)
+
+            await wakeup_admins(
+                f"Аккаунт {phone} отключён из-за ошибки [401 AUTH_KEY_UNREGISTERED]. Пожалуйста, добавьте его заново.")
 
 
 # Функция для остановки клиентов Pyrogram
@@ -157,22 +182,25 @@ async def cmd_start(message: Message):
     commands_text = """
 Привет! Я бот для мониторинга заявок. Вот список доступных команд:
 
+/accounts - Просмотреть привязаны аккаунты  
 /add_account - Добавить новый аккаунт для мониторинга
 /remove_account - Удалить существующий аккаунт
-/daily_report - Получить отчет за последние 24 часа
-/weekly_report - Получить отчет за последнюю неделю
-/report day
-/report week
+/report - Получить отчет
 Для начала работы добавьте аккаунт с помощью команды /add_account
 """
     await message.answer(commands_text)
+
+
+def get_cancel_keyboard():
+    return InlineKeyboardBuilder([[InlineKeyboardButton(text='Отменить 🚫', callback_data="cancel")]]).as_markup()
 
 
 # Обработчик команды добавления аккаунта
 @dp.message(Command("add_account"))
 async def cmd_add_account(message: Message, state: FSMContext):
     await state.set_state(UserStates.waiting_for_phone)
-    await message.answer("Введите номер телефона, к которому привязан Telegram аккаунт:")
+    await message.answer("Введите номер телефона, к которому привязан Telegram аккаунт:",
+                         reply_markup=get_cancel_keyboard())
 
 
 # Обработчик ввода номера телефона
@@ -186,7 +214,8 @@ async def process_phone(message: Message, state: FSMContext):
 
     # Запрашиваем API ID
     await state.set_state(UserStates.waiting_for_api_id)
-    await message.answer("Введите API ID (можно получить на https://my.telegram.org):")
+    await message.answer("Введите API ID (можно получить на https://my.telegram.org):",
+                         reply_markup=get_cancel_keyboard())
 
 
 # Обработчик ввода API ID
@@ -203,9 +232,10 @@ async def process_api_id(message: Message, state: FSMContext):
 
         # Запрашиваем API Hash
         await state.set_state(UserStates.waiting_for_api_hash)
-        await message.answer("Введите API Hash (можно получить на https://my.telegram.org):")
+        await message.answer("Введите API Hash (можно получить на https://my.telegram.org):",
+                             reply_markup=get_cancel_keyboard())
     except ValueError:
-        await message.answer("API ID должен быть числом. Попробуйте еще раз:")
+        await message.answer("API ID должен быть числом. Попробуйте еще раз:", reply_markup=get_cancel_keyboard())
 
 
 # Обработчик ввода API Hash
@@ -234,7 +264,7 @@ async def process_api_hash(message: Message, state: FSMContext):
             sent_code = await client.send_code(phone)
             await state.update_data(client=client, sent_code=sent_code)
             await state.set_state(UserStates.waiting_for_code)
-            await message.answer("Введите код подтверждения:")
+            await message.answer("Введите код подтверждения:", reply_markup=get_cancel_keyboard())
         else:
             pyrogram_clients[phone] = client
             # Сохраняем аккаунт со всеми данными
@@ -288,7 +318,7 @@ async def process_code(message: Message, state: FSMContext):
         accounts[phone] = data
         save_accounts(accounts)
 
-        await data['client'].disconnect()
+        await client.disconnect()
 
         # Очищаем временные данные
         if phone in client_temp_data:
@@ -300,11 +330,27 @@ async def process_code(message: Message, state: FSMContext):
 
     except Exception as e:
         traceback.print_exc()
-        await wakeup_admins("Обработчик ввода кода подтверждения")
+        await wakeup_admins("Ошибка в бработчике ввода кода подтверждения")
         if phone in client_temp_data:
             del client_temp_data[phone]
 
     await state.clear()
+
+
+# Обработчик команды для удаления аккаунта
+@dp.message(Command("accounts"))
+async def cmd_get_accounts(message: Message):
+    accounts = load_accounts()
+    if not accounts:
+        await message.answer("Нет добавленных аккаунтов.")
+        return
+
+    n = '\n'
+    text = f"""Привязанные аккаунты:
+<blockquote>
+{n.join(['• ' + str(phone) for phone in list(accounts.keys())])}
+</blockquote>"""
+    await message.answer(text, parse_mode='HTML')
 
 
 # Обработчик команды для удаления аккаунта
@@ -369,16 +415,33 @@ def parse_order_message(text):
     }
 
 
-async def handle_message(client: Client, message):
+# Запрашиваем имя
+@dp.callback_query(F.data == 'cancel')
+async def handle_cancel_order(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await bot.delete_message(call.message.chat.id, call.message.message_id)
+    msg = await bot.send_message(call.message.chat.id, "Действие отменено.")
+    # time.sleep(5)
+    # await bot.delete_message(call.message.chat.id, msg.message_id)
+
+
+async def handle_message(client: Client, message: Message):
     if message.text:
         parsed_data = parse_order_message(message.text)
         if parsed_data:
             orders = load_orders()
+            chat_id = str(message.from_user.id)
 
-            if parsed_data['city'] not in orders:
-                orders[parsed_data['city']] = {}
+            if chat_id not in orders:
+                chat_name = message.chat.title if message.chat.title is not None else f'{message.chat.first_name} {message.chat.last_name}'
+                orders[chat_id] = {}
+                orders[chat_id]['streets'] = {}
+                orders[chat_id]['chat_name'] = chat_name
 
-            orders_in_address = orders[parsed_data['city']].get(parsed_data['address'], [])
+            if parsed_data['city'] not in orders[chat_id]['streets']:
+                orders[chat_id]['streets'][parsed_data['city']] = {}
+
+            orders_in_address = orders[chat_id]['streets'][parsed_data['city']].get(parsed_data['address'], [])
 
             orders_in_address.append({
                 'body_count': parsed_data['body_count'],
@@ -386,7 +449,7 @@ async def handle_message(client: Client, message):
                 'datetime': parsed_data['datetime']
             })
 
-            orders[parsed_data['city']][parsed_data['address']] = orders_in_address
+            orders[chat_id]['streets'][parsed_data['city']][parsed_data['address']] = orders_in_address
 
             save_orders(orders)
             print(f"Сохранена новая заявка: {parsed_data}")
@@ -459,51 +522,121 @@ def generate_report(report):
     return "\n".join(report_lines)
 
 
-# Обработчик команды для получения отчета за день
+# Получение списка названий чатов
+def get_chat_titles():
+    return [item['chat_name'] for _, item in load_orders().items()]
+
+
+# Обработчик начало получения отчета
 @dp.message(Command("report"))
-async def cmd_daily_report(message: Message):
-    data = load_orders()
+async def cmd_report(message: Message, state: FSMContext):
+    chats = get_chat_titles()
+    if len(chats) == 0:
+        await message.answer("Отчёт пуст.")
+
+        return
+    keyboard = types.ReplyKeyboardMarkup(
+        keyboard=[[types.KeyboardButton(text=chat_id)] for chat_id in chats],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    await message.answer("Выберите один из предложенных чатов:", reply_markup=keyboard)
+    await state.set_state(UserStates.waiting_for_chat_id)
+
+
+# Обработчик выбора чата
+@dp.message(UserStates.waiting_for_chat_id)
+async def process_chat_id(message: Message, state: FSMContext):
+    try:
+        chat_name = message.text.strip()
+
+        if chat_name not in get_chat_titles():
+            raise ValueError("Неверное значение")
+
+        await state.set_state(UserStates.waiting_for_report_type)
+        await state.update_data(choosed_chat_name=chat_name)
+        # Запрашиваем тип отчёта
+        keyboard = types.ReplyKeyboardMarkup(
+            keyboard=[[types.KeyboardButton(text="За последние 24 часа")],
+                      [types.KeyboardButton(text="За последние 7 дней")]],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+        await message.answer("Введите тип отчёта:", reply_markup=keyboard)
+    except ValueError:
+        await message.answer("Chat ID должен быть числом. Попробуйте еще раз:")
+
+
+# Обработчик выбора чата
+@dp.message(UserStates.waiting_for_report_type)
+async def process_chat_id(message: Message, state: FSMContext):
+    try:
+        report_type = message.text.strip()
+
+        if report_type not in ["За последние 24 часа", "За последние 7 дней"]:
+            raise ValueError("Неверное значение")
+
+        if report_type == "За последние 24 часа":
+            report_type = "day"
+        elif report_type == "За последние 7 дней":
+            report_type = "week"
+
+        # Запрашиваем тип отчёта
+        data = await state.get_data()
+
+        await bot.send_message(chat_id=message.from_user.id,
+                               text=get_report(report_type, chat_name=data["choosed_chat_name"]))
+        await state.set_state(UserStates.waiting_for_report_type)
+    except ValueError:
+        await message.answer("Неверный тип отчета Попробуйте еще раз:")
+
+
+# получения отчета
+def get_report(report_type: str, chat_name):
+    for key, item in load_orders().items():
+        if item['chat_name'] == chat_name:
+            chat_id = key
+            break
+    else:
+        return "Отчёт пуст"
+    data = load_orders().get(chat_id, {}).get("streets", {})
     now = datetime.now()
-    command_args = message.text.split()[-1]
-    if command_args == "day":
+    if report_type == "day":
         start_date = now - timedelta(days=1)
-    elif command_args == "week":
+    elif report_type == "week":
         start_date = now - timedelta(weeks=1)
     else:
-        await message.reply("Пожалуйста, используйте команду с аргументом: /report day или /report week")
-        return
+        return "Отчёт пуст"
     end_date = now
     report = process_data(data, start_date, end_date)
     report_text = generate_report(report)
-    await message.reply(report_text)
+    if report_text == "":
+        return "Отчёт пуст"
+    return report_text
 
 
-# Обработчик команды для получения отчета за неделю
-@dp.message(Command("weekly_report"))
-async def cmd_weekly_report(message: Message):
-    orders = load_orders()
-    today = datetime.now()
-    report = "Отчет за последнюю неделю:\n\n"
+# Функция мониторинга клиентов
+async def monitor_clients():
+    while True:
+        for phone, client in list(pyrogram_clients.items()):
+            try:
+                # Проверяем, авторизован ли пользователь
+                is_authorized = await is_user_authorized(client)
+                if not is_authorized:
+                    await wakeup_admins(f"Аккаунт {phone} был отключен! Пожалуйста, добавьте его заново.")
 
-    for city, addresses in orders.items():
-        city_orders = []
-        for address, data in addresses.items():
-            order_date = datetime.strptime(data['datetime'], "%Y.%m.%d %H:%M:%S")
-            if today - order_date < timedelta(days=7):
-                city_orders.append(
-                    f"Адрес: {address}\n"
-                    f"Требуется человек: {data['body_count']}\n"
-                    f"Оплата: {data['paid_amount']}₽/час\n"
-                    f"Время: {data['datetime']}\n"
-                )
+                    accounts = load_accounts()
+                    if phone in accounts:
+                        del accounts[phone]
+                        save_accounts(accounts)
 
-        if city_orders:
-            report += f"🏙 {city}:\n" + "\n".join(city_orders) + "\n"
 
-    if report == "Отчет за последнюю неделю:\n\n":
-        report = "За последнюю неделю заявок не было."
-
-    await message.answer(report)
+                    await disable_active_account(phone)
+            except Exception as e:
+                traceback.print_exc()
+                await wakeup_admins(f"Произошла ошибка при проверке аккаунта {phone}: {str(e)}")
+                await disable_active_account(phone)
+        await asyncio.sleep(60)  # Проверка каждые 60 секунд
 
 
 # Запуск бота
@@ -515,8 +648,11 @@ async def main():
         for phone, data in accounts.items():
             pyrogram_tasks.append(init_account(phone, data))
 
+        # Добавляем задачу мониторинга клиентов
+        monitor_task = asyncio.create_task(monitor_clients())
+
         aiogram_task = dp.start_polling(bot)
-        await asyncio.gather(*pyrogram_tasks, aiogram_task)
+        await asyncio.gather(*pyrogram_tasks, monitor_task, aiogram_task)
     except Exception:
         traceback.print_exc()
 
