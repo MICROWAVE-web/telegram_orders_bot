@@ -283,9 +283,9 @@ async def process_api_hash(message: Message, state: FSMContext):
             if phone in client_temp_data:
                 del client_temp_data[phone]
             await message.answer("Аккаунт успешно добавлен!")
-
-            await asyncio.create_task(init_account(phone, data))
             await state.clear()
+            await asyncio.create_task(init_account(phone, data))
+
 
     except Exception as e:
         traceback.print_exc()
