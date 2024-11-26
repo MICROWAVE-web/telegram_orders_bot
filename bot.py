@@ -333,7 +333,11 @@ async def process_code(message: Message, state: FSMContext):
 
     except Exception as e:
         traceback.print_exc()
-        await wakeup_admins("Ошибка в бработчике ввода кода подтверждения")
+
+        if 'The confirmation code is invalid' in str(e):
+            await message.answer("Неверный код. Введите код подтверждения:", reply_markup=get_cancel_keyboard())
+            return
+        await wakeup_admins("Ошибка в оработчике ввода кода подтверждения")
         if phone in client_temp_data:
             del client_temp_data[phone]
 
