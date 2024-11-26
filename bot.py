@@ -328,6 +328,7 @@ async def process_code(message: Message, state: FSMContext):
             del client_temp_data[phone]
 
         await message.answer("Аккаунт успешно добавлен!")
+        await state.clear()
 
         await asyncio.create_task(init_account(phone, data))
 
@@ -636,7 +637,6 @@ async def monitor_clients():
                     if phone in accounts:
                         del accounts[phone]
                         save_accounts(accounts)
-
 
                     await disable_active_account(phone)
             except Exception as e:
