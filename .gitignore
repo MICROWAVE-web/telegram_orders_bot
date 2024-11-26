@@ -3,3 +3,4 @@
 /.env
 /accounts.json
 /orders.json
+/.venv/
