@@ -498,20 +498,45 @@ def process_data(data, start_date, end_date):
                 city_report['unique_requests_by_price'][max_paid] = 1
 
         # считаем адреса с кол-вом заявок >= 8 или максимальным значением
+        add_counter = 0
+        max_bodies_in_adress = 0
         for address, body_list in body_in_address.items():
             mx_body_count = max(body_list)
+
             our_buddies = 0
             for b in body_list:
-                if b >= 8 or b == mx_body_count:
+                if b >= 8:
                     our_buddies += b
+                elif b == mx_body_count:
+                    our_buddies += b
+
+            # обновляем переменные для вывода в отчет всех > 8 либо максимальное колво
+            if our_buddies > 8:
+                add_counter += 1
+            max_bodies_in_adress = max(max_bodies_in_adress, our_buddies)
+
             city_report['address_with_people'][address] = our_buddies
 
-        # считаем кол-во уникальных заказов
-        '''for key, value in address_in_price.items():
-            address_in_price[key] = len(value)
-        city_report["unique_requests_by_price"] = address_in_price'''
 
+
+        # Сохраняем ключи для удаления
+        keys_to_remove = []
+
+        # Фильтруем
+        for address, buddies in city_report['address_with_people'].items():
+            if add_counter > 0 and buddies < 8:
+                keys_to_remove.append(address)
+            elif add_counter == 0 and buddies != max_bodies_in_adress:
+                keys_to_remove.append(address)
+
+        # Удаляем ключи из словаря
+        for key in keys_to_remove:
+            del city_report['address_with_people'][key]
+
+        sorted_address_with_people = dict(sorted(city_report['address_with_people'].items(), key=lambda item: item[1], reverse=True))
+        city_report['address_with_people'] = sorted_address_with_people
         report[city] = city_report
+
 
     return report
 
