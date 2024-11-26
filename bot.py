@@ -150,7 +150,10 @@ async def is_user_authorized(client):
 # Оповещение администрации
 async def wakeup_admins(message):
     for admin in ADMINS:
-        await bot.send_message(chat_id=admin, text=message)
+        try:
+            await bot.send_message(chat_id=admin, text=message)
+        except Exception:
+            traceback.print_exc()
 
 
 # Отключение активного аккаунта:
