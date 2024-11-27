@@ -723,9 +723,15 @@ async def process_end_date(message: Message, state: FSMContext):
 
         # Генерация и отправка CSV отчёта
         file_path = generate_csv_report(chat_name, start_date, end_date)
-        await bot.send_document(message.from_user.id, FSInputFile(file_path),
-                                caption=f"Отчёт {chat_name} {start_date.strftime('%d-%m-%Y')}-{end_date.strftime('%d-%m-%Y')}",
-                                reply_markup=start_keyboard())
+        try:
+            await bot.send_document(message.from_user.id, FSInputFile(file_path),
+                                    caption=f"Отчёт {chat_name} {start_date.strftime('%d-%m-%Y')}-{end_date.strftime('%d-%m-%Y')}",
+                                    reply_markup=start_keyboard())
+        finally:
+            # Удаление файла после отправки
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
         await state.clear()
     except ValueError:
         await message.answer("Неверный формат даты или дата некорректна. Попробуйте ещё раз.")
