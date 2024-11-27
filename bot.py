@@ -465,15 +465,16 @@ async def handle_message(client: Client, message: Message):
 
 # Обработка данных
 def process_data(data, start_date, end_date):
-    report = {}
+    report = {
+        'summ_unique_requests_count': 0
+    }
     for city, addresses in data.items():
-        address_in_price = {}
         body_in_address = {}  # кол-во людей в заявках
         city_report = {
             "unique_requests_by_price": {},
             "address_with_people": {},
-            "unique_requests_count": len(addresses)
         }
+        report['summ_unique_requests_count'] += len(addresses)
         for address, orders in addresses.items():
             max_paid = 0
             for order in orders:
@@ -517,8 +518,6 @@ def process_data(data, start_date, end_date):
 
             city_report['address_with_people'][address] = our_buddies
 
-
-
         # Сохраняем ключи для удаления
         keys_to_remove = []
 
@@ -533,10 +532,10 @@ def process_data(data, start_date, end_date):
         for key in keys_to_remove:
             del city_report['address_with_people'][key]
 
-        sorted_address_with_people = dict(sorted(city_report['address_with_people'].items(), key=lambda item: item[1], reverse=True))
+        sorted_address_with_people = dict(
+            sorted(city_report['address_with_people'].items(), key=lambda item: item[1], reverse=True))
         city_report['address_with_people'] = sorted_address_with_people
         report[city] = city_report
-
 
     return report
 
@@ -545,13 +544,15 @@ def process_data(data, start_date, end_date):
 def generate_report(report):
     report_lines = []
     for city, info in report.items():
+        if city == 'summ_unique_requests_count':
+            continue
         report_lines.append(city)
         for price, count in info["unique_requests_by_price"].items():
             report_lines.append(f" - {price} р/час ({count} заявок)")
         for address, people in info["address_with_people"].items():
             report_lines.append(f"Адрес: {address} ({people} человек)")
-        report_lines.append(f"Общее число заявок ({info['unique_requests_count']})")
         report_lines.append("")
+    report_lines.append(f"Общее число заявок ({report['summ_unique_requests_count']})")
     return "\n".join(report_lines)
 
 
