@@ -521,7 +521,6 @@ async def handle_message(client: Client, message: Message):
             orders[chat_id]['streets'][parsed_data['city']][parsed_data['address']] = orders_in_address
 
             save_orders(orders)
-            print(f"Сохранена новая заявка: {parsed_data}")
 
 
 # Обработка данных
@@ -720,7 +719,6 @@ def get_report(report_type: str, chat_name):
         return "Отчёт пуст"
     end_date = now
     report = process_data(data, start_date, end_date)
-    print(report)
     report_text = generate_report(report)
     if report_text == "":
         return "Отчёт пуст"
