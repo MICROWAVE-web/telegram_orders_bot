@@ -1,4 +1,5 @@
 import asyncio
+import csv
 import json
 import logging
 import os
@@ -12,12 +13,13 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message, InlineKeyboardButton, CallbackQuery
+from aiogram.types import Message, InlineKeyboardButton, CallbackQuery, FSInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from decouple import config
 from dotenv import load_dotenv
 from pyrogram import Client, filters, idle
 from pyrogram.handlers import MessageHandler
+from rapidfuzz import process
 
 load_dotenv()
 
@@ -66,6 +68,8 @@ class UserStates(StatesGroup):
     waiting_for_chat_id = State()
     waiting_for_report_type = State()
     waiting_for_access_code = State()
+    waiting_for_report_start_date = State()
+    waiting_for_report_end_date = State()
 
 
 # Словарь для хранения клиентов Pyrogram
@@ -214,19 +218,33 @@ async def process_code(message: Message, state: FSMContext):
         await message.answer("Неверный код. Попробуйте еще раз.", reply_markup=get_cancel_keyboard())
 
 
+def start_keyboard():
+    # Создаем кнопки для клавиатуры
+    keyboard = types.ReplyKeyboardMarkup(
+        keyboard=[
+            [types.KeyboardButton(text="/report")],
+            [types.KeyboardButton(text="/accounts")],
+            [types.KeyboardButton(text="/add_account")],
+            [types.KeyboardButton(text="/remove_account")],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    return keyboard
+
+
 # Обработчик команды /start
 @dp.message(Command("start"))
-async def cmd_start(message: Message):
+async def cmd_start(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    if user_id not in authorized_users:
+        await message.answer("Введите код для доступа к боту:", reply_markup=get_cancel_keyboard())
+        await state.set_state(UserStates.waiting_for_access_code)  # Устанавливаем состояние ожидания кода
+        return
     commands_text = """
 Привет! Я бот для мониторинга заявок. Вот список доступных команд:
-
-/accounts - Просмотреть привязаны аккаунты  
-/add_account - Добавить новый аккаунт для мониторинга
-/remove_account - Удалить существующий аккаунт
-/report - Получить отчет
-Для начала работы добавьте аккаунт с помощью команды /add_account
 """
-    await message.answer(commands_text)
+    await message.answer(commands_text, reply_markup=start_keyboard())
 
 
 def get_cancel_keyboard():
@@ -333,7 +351,7 @@ async def process_api_hash(message: Message, state: FSMContext):
             # Очищаем временные данные
             if phone in client_temp_data:
                 del client_temp_data[phone]
-            await message.answer("Аккаунт успешно добавлен!")
+            await message.answer("Аккаунт успешно добавлен!", reply_markup=start_keyboard())
             await state.clear()
             await asyncio.create_task(init_account(phone, data))
 
@@ -378,7 +396,7 @@ async def process_code(message: Message, state: FSMContext):
         if phone in client_temp_data:
             del client_temp_data[phone]
 
-        await message.answer("Аккаунт успешно добавлен!")
+        await message.answer("Аккаунт успешно добавлен!", reply_markup=start_keyboard())
         await state.clear()
 
         await asyncio.create_task(init_account(phone, data))
@@ -406,7 +424,8 @@ async def cmd_get_accounts(message: Message, state: FSMContext):
         return
     accounts = load_accounts()
     if not accounts:
-        await message.answer("Нет добавленных аккаунтов.")
+        await message.answer("Нет добавленных аккаунтов.", reply_markup=start_keyboard())
+        await state.clear()
         return
 
     n = '\n'
@@ -414,7 +433,7 @@ async def cmd_get_accounts(message: Message, state: FSMContext):
 <blockquote>
 {n.join(['• ' + str(phone) for phone in list(accounts.keys())])}
 </blockquote>"""
-    await message.answer(text, parse_mode='HTML')
+    await message.answer(text, parse_mode='HTML', reply_markup=start_keyboard())
 
 
 # Обработчик команды для удаления аккаунта
@@ -427,7 +446,8 @@ async def cmd_remove_account(message: Message, state: FSMContext):
         return
     accounts = load_accounts()
     if not accounts:
-        await message.answer("Нет добавленных аккаунтов.")
+        await message.answer("Нет добавленных аккаунтов.", reply_markup=start_keyboard())
+        await state.clear()
         return
 
     keyboard = types.ReplyKeyboardMarkup(
@@ -440,7 +460,7 @@ async def cmd_remove_account(message: Message, state: FSMContext):
 
 # Обработчик выбора аккаунта для удаления
 @dp.message(lambda message: message.text in load_accounts())
-async def process_remove_account(message: Message):
+async def process_remove_account(message: Message, state: FSMContext):
     phone = message.text
     accounts = load_accounts()
 
@@ -453,16 +473,15 @@ async def process_remove_account(message: Message):
         save_accounts(accounts)
 
         await message.answer(
-            f"Аккаунт {phone} успешно удален.",
-            reply_markup=types.ReplyKeyboardRemove()
+            f"Аккаунт {phone} успешно удален.", reply_markup=start_keyboard()
         )
-
 
     else:
         await message.answer(
-            "Аккаунт не найден.",
-            reply_markup=types.ReplyKeyboardRemove()
+            "Аккаунт не найден.", reply_markup=start_keyboard()
         )
+
+    await state.clear()
 
 
 # Функция для парсинга сообщения
@@ -471,8 +490,9 @@ def parse_order_message(text):
     address_match = re.search(r'Адрес:\s*👉\s*(.*?)(?=\n|$)', text)
     count_match = re.search(r'Нужен\s*(\d+)/(\d+)', text)
     payment_match = re.search(r'Оплата:\s*(\d+)\s*₽/час', text)
+    start_match = re.search(r'Начало:\s*(.*?)(?=\n|$)', text)
 
-    if not all([city_match, address_match, count_match, payment_match]):
+    if not all([city_match, address_match, count_match, payment_match, start_match]):
         return None
 
     return {
@@ -480,6 +500,7 @@ def parse_order_message(text):
         'address': address_match.group(1).strip(),
         'body_count': int(count_match.group(2)),
         'paid_amount': int(payment_match.group(1)),
+        'start': start_match.group(1).strip(),
         'datetime': datetime.now().strftime("%Y.%m.%d %H:%M:%S")
     }
 
@@ -489,7 +510,7 @@ def parse_order_message(text):
 async def handle_cancel_order(call: CallbackQuery, state: FSMContext):
     await state.clear()
     await bot.delete_message(call.message.chat.id, call.message.message_id)
-    msg = await bot.send_message(call.message.chat.id, "Действие отменено.")
+    msg = await bot.send_message(call.message.chat.id, "Действие отменено.", reply_markup=start_keyboard())
     # time.sleep(5)
     # await bot.delete_message(call.message.chat.id, msg.message_id)
 
@@ -515,7 +536,8 @@ async def handle_message(client: Client, message: Message):
             orders_in_address.append({
                 'body_count': parsed_data['body_count'],
                 'paid_amount': parsed_data['paid_amount'],
-                'datetime': parsed_data['datetime']
+                'datetime': parsed_data['datetime'],
+                'start': parsed_data['start'].lower()
             })
 
             orders[chat_id]['streets'][parsed_data['city']][parsed_data['address']] = orders_in_address
@@ -537,25 +559,32 @@ def process_data(data, start_date, end_date):
         report['summ_unique_requests_count'] += len(addresses)
 
         # Сохранение дубликатов заказов за последние 2 часа по цене количеству человек
-        duplicate_dates = {}
+        # [(время, фраза начала), ...]
+        duplicate_dates = []
         for address, orders in addresses.items():
             max_paid = 0
             for order in orders:
                 order_date = datetime.strptime(order["datetime"], "%Y.%m.%d %H:%M:%S")
                 if start_date <= order_date <= end_date:
 
-                    duplicate_key = f"{order['paid_amount']}_{order['body_count']}"
-                    if duplicate_key in duplicate_dates.keys():
-                        # Рассчитываем разницу
-                        difference = abs(order_date - duplicate_dates[duplicate_key])
-                        if difference > timedelta(hours=2):
-                            # Устанавливаем новое время
-                            duplicate_dates[duplicate_key] = order_date
+                    if order.get("start") is not None:
+                        # Находим самый близкий по фразе заказ
+                        best_match = process.extractOne(
+                            order['start'],
+                            [i[1] for i in duplicate_dates]
+                        )
+                        if best_match is not None:
+                            match, similarity, _ = best_match
+
+                            match_data = list(filter(lambda x: x[1] == match, duplicate_dates))[0][0]
+                            # Рассчитываем разницу
+                            difference = abs(order_date - match_data)
+                            if similarity > 92 and difference < timedelta(hours=12):
+                                continue
+                            else:
+                                duplicate_dates.append((order_date, order['start']))
                         else:
-                            # Пропускаем заказ дубликат
-                            continue
-                    else:
-                        duplicate_dates[duplicate_key] = order_date
+                            duplicate_dates.append((order_date, order['start']))
 
                     if address not in body_in_address:
                         body_in_address[address] = [order['body_count']]
@@ -627,6 +656,126 @@ def generate_report(report):
     return "\n".join(report_lines)
 
 
+# Запуск ввода диапазона для отчёта
+@dp.message(UserStates.waiting_for_report_type)
+async def process_report_request(message: Message, state: FSMContext):
+    try:
+        report_type = message.text.strip()
+
+        # Проверяем тип отчета
+        if report_type not in ["Экспорт CSV", "За последние 24 часа", "За последние 7 дней"]:
+            raise ValueError("Неверное значение")
+
+        data = await state.get_data()
+        chat_name = data.get("choosed_chat_name")
+        if chat_name is None:
+            return
+
+        if report_type == "Экспорт CSV":
+            await message.answer("Введите начальную дату в формате DD-MM-YYYY:")
+            await state.set_state(UserStates.waiting_for_report_start_date)
+        else:
+            # Предустановленные диапазоны
+            if report_type == "За последние 24 часа":
+                report_type = "day"
+            elif report_type == "За последние 7 дней":
+                report_type = "week"
+
+            # Запрашиваем тип отчёта
+            data = await state.get_data()
+
+            await bot.send_message(chat_id=message.from_user.id,
+                                   text=get_report(report_type, chat_name=data["choosed_chat_name"]),
+                                   reply_markup=start_keyboard())
+
+            await state.clear()
+    except ValueError:
+        await message.answer("Неверный тип отчета. Попробуйте еще раз.", reply_markup=start_keyboard())
+        await state.clear()
+
+
+# Обработчик для начальной даты
+@dp.message(UserStates.waiting_for_report_start_date)
+async def process_start_date(message: Message, state: FSMContext):
+    try:
+        start_date = datetime.strptime(message.text.strip(), "%d-%m-%Y")
+        await state.update_data(start_date=start_date)
+        await message.answer("Введите конечную дату в формате DD-MM-YYYY:")
+        await state.set_state(UserStates.waiting_for_report_end_date)
+    except ValueError:
+        await message.answer("Неверный формат даты. Попробуйте ещё раз (пример: 27-11-2024).")
+
+
+# Обработчик для конечной даты
+@dp.message(UserStates.waiting_for_report_end_date)
+async def process_end_date(message: Message, state: FSMContext):
+    try:
+        end_date = datetime.strptime(message.text.strip(), "%d-%m-%Y")
+        data = await state.get_data()
+        start_date = data.get("start_date")
+
+        if not start_date or end_date < start_date:
+            raise ValueError("Конечная дата должна быть после начальной.")
+
+        chat_name = data.get("choosed_chat_name")
+        if chat_name is None:
+            return
+
+        # Генерация и отправка CSV отчёта
+        file_path = generate_csv_report(chat_name, start_date, end_date)
+        await bot.send_document(message.from_user.id, FSInputFile(file_path),
+                                caption=f"Отчёт {chat_name} {start_date.strftime('%d-%m-%Y')}-{end_date.strftime('%d-%m-%Y')}",
+                                reply_markup=start_keyboard())
+        await state.clear()
+    except ValueError:
+        await message.answer("Неверный формат даты или дата некорректна. Попробуйте ещё раз.")
+
+
+# Функция генерации отчёта в CSV
+def generate_csv_report(chat_name: str, start_date: datetime, end_date: datetime) -> str:
+    for key, item in load_orders().items():
+        if item['chat_name'] == chat_name:
+            chat_id = key
+            break
+    data = load_orders().get(chat_id, {}).get("streets", {})
+    data = process_data(data, start_date, end_date)  # Загружаем данные заказов
+    report_lines = []
+
+    # Обходим данные
+    for city, city_data in data.items():
+        if city == "summ_unique_requests_count":
+            continue  # Пропускаем это поле
+        unique_requests_by_price = city_data.get("unique_requests_by_price", {})
+        address_with_people = city_data.get("address_with_people", {})
+
+        # Пишем данные о ценах и запросах
+        for price, requests in unique_requests_by_price.items():
+            report_lines.append({
+                "Город": city,
+                "Тип данных": "Цена",
+                "Значение": price,
+                "Количество": requests
+            })
+
+        # Пишем данные об адресах и количестве людей
+        for address, people_count in address_with_people.items():
+            report_lines.append({
+                "Город": city,
+                "Тип данных": "Адрес",
+                "Значение": address,
+                "Количество": people_count
+            })
+
+    # Создаём CSV файл
+    file_path = f"report_{chat_name.replace(' ', '')}_{start_date.strftime('%d%m%Y')}_{end_date.strftime('%d%m%Y')}.csv"
+    with open(file_path, mode="w", newline="", encoding="cp1251") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=["Город", "Тип данных", "Значение", "Количество"], delimiter='|')
+        writer.writeheader()
+        writer.writerows(report_lines)
+
+    return file_path
+
+
 # Получение списка названий чатов
 def get_chat_titles():
     return [item['chat_name'] for _, item in load_orders().items()]
@@ -642,8 +791,8 @@ async def cmd_report(message: Message, state: FSMContext):
         return
     chats = get_chat_titles()
     if len(chats) == 0:
-        await message.answer("Отчёт пуст.")
-
+        await message.answer("Отчёт пуст.", reply_markup=start_keyboard())
+        await state.clear()
         return
     keyboard = types.ReplyKeyboardMarkup(
         keyboard=[[types.KeyboardButton(text=chat_id)] for chat_id in chats],
@@ -667,7 +816,8 @@ async def process_chat_id(message: Message, state: FSMContext):
         await state.update_data(choosed_chat_name=chat_name)
         # Запрашиваем тип отчёта
         keyboard = types.ReplyKeyboardMarkup(
-            keyboard=[[types.KeyboardButton(text="За последние 24 часа")],
+            keyboard=[[types.KeyboardButton(text="Экспорт CSV")],
+                      [types.KeyboardButton(text="За последние 24 часа")],
                       [types.KeyboardButton(text="За последние 7 дней")]],
             resize_keyboard=True,
             one_time_keyboard=True
@@ -678,7 +828,7 @@ async def process_chat_id(message: Message, state: FSMContext):
 
 
 # Обработчик выбора чата
-@dp.message(UserStates.waiting_for_report_type)
+"""@dp.message(UserStates.waiting_for_report_type)
 async def process_chat_id(message: Message, state: FSMContext):
     try:
         report_type = message.text.strip()
@@ -698,7 +848,7 @@ async def process_chat_id(message: Message, state: FSMContext):
                                text=get_report(report_type, chat_name=data["choosed_chat_name"]))
         await state.set_state(UserStates.waiting_for_report_type)
     except ValueError:
-        await message.answer("Неверный тип отчета Попробуйте еще раз:")
+        await message.answer("Неверный тип отчета Попробуйте еще раз:")"""
 
 
 # получения отчета
@@ -719,6 +869,7 @@ def get_report(report_type: str, chat_name):
         return "Отчёт пуст"
     end_date = now
     report = process_data(data, start_date, end_date)
+    print(report)
     report_text = generate_report(report)
     if report_text == "":
         return "Отчёт пуст"
