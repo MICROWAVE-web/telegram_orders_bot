@@ -24,6 +24,8 @@ load_dotenv()
 # Конфигурация бота
 BOT_TOKEN = config("BOT_TOKEN")
 ADMINS = config('ADMINS').split(',')
+ACCESS_CODE = config('ACCESS_CODE')
+ACCESS_FILE = "authorized_users.json"
 
 # defining the timezone
 tz = pytz.timezone('Europe/Moscow')
@@ -36,6 +38,25 @@ dp = Dispatcher()
 logging.basicConfig(level=logging.WARNING, stream=sys.stdout)
 
 
+# Загрузка списка авторизованных пользователей из файла
+def load_authorized_users():
+    try:
+        with open(ACCESS_FILE, "r") as file:
+            return set(json.load(file))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return set()
+
+
+# Список авторизованных пользователей
+authorized_users = load_authorized_users()
+
+
+# Сохранение списка авторизованных пользователей в файл
+def save_authorized_users(users):
+    with open(ACCESS_FILE, "w") as file:
+        json.dump(list(users), file)
+
+
 # Состояния FSM
 class UserStates(StatesGroup):
     waiting_for_phone = State()
@@ -44,6 +65,7 @@ class UserStates(StatesGroup):
     waiting_for_code = State()
     waiting_for_chat_id = State()
     waiting_for_report_type = State()
+    waiting_for_access_code = State()
 
 
 # Словарь для хранения клиентов Pyrogram
@@ -179,6 +201,19 @@ async def disable_active_account(phone):
         del pyrogram_clients[phone]
 
 
+# Обработка ввода кода
+@dp.message(UserStates.waiting_for_access_code)
+async def process_code(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    if message.text == ACCESS_CODE:
+        authorized_users.add(user_id)
+        save_authorized_users(authorized_users)  # Сохраняем изменения
+        await message.answer("Авторизация успешна! Теперь вы можете пользоваться командами бота.")
+        await state.clear()  # Сбрасываем состояние
+    else:
+        await message.answer("Неверный код. Попробуйте еще раз.", reply_markup=get_cancel_keyboard())
+
+
 # Обработчик команды /start
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
@@ -201,6 +236,11 @@ def get_cancel_keyboard():
 # Обработчик команды добавления аккаунта
 @dp.message(Command("add_account"))
 async def cmd_add_account(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    if user_id not in authorized_users:
+        await message.answer("Введите код для доступа к боту:", reply_markup=get_cancel_keyboard())
+        await state.set_state(UserStates.waiting_for_access_code)  # Устанавливаем состояние ожидания кода
+        return
     await state.set_state(UserStates.waiting_for_phone)
     await message.answer("Введите номер телефона, к которому привязан Telegram аккаунт:",
                          reply_markup=get_cancel_keyboard())
@@ -347,7 +387,12 @@ async def process_code(message: Message, state: FSMContext):
 
 # Обработчик команды для удаления аккаунта
 @dp.message(Command("accounts"))
-async def cmd_get_accounts(message: Message):
+async def cmd_get_accounts(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    if user_id not in authorized_users:
+        await message.answer("Введите код для доступа к боту:", reply_markup=get_cancel_keyboard())
+        await state.set_state(UserStates.waiting_for_access_code)  # Устанавливаем состояние ожидания кода
+        return
     accounts = load_accounts()
     if not accounts:
         await message.answer("Нет добавленных аккаунтов.")
@@ -363,7 +408,12 @@ async def cmd_get_accounts(message: Message):
 
 # Обработчик команды для удаления аккаунта
 @dp.message(Command("remove_account"))
-async def cmd_remove_account(message: Message):
+async def cmd_remove_account(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    if user_id not in authorized_users:
+        await message.answer("Введите код для доступа к боту:", reply_markup=get_cancel_keyboard())
+        await state.set_state(UserStates.waiting_for_access_code)  # Устанавливаем состояние ожидания кода
+        return
     accounts = load_accounts()
     if not accounts:
         await message.answer("Нет добавленных аккаунтов.")
@@ -564,6 +614,11 @@ def get_chat_titles():
 # Обработчик начало получения отчета
 @dp.message(Command("report"))
 async def cmd_report(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    if user_id not in authorized_users:
+        await message.answer("Введите код для доступа к боту:", reply_markup=get_cancel_keyboard())
+        await state.set_state(UserStates.waiting_for_access_code)  # Устанавливаем состояние ожидания кода
+        return
     chats = get_chat_titles()
     if len(chats) == 0:
         await message.answer("Отчёт пуст.")
