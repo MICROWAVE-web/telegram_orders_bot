@@ -304,7 +304,18 @@ async def process_api_hash(message: Message, state: FSMContext):
         await client.connect()
 
         if not await is_user_authorized(client):
-            sent_code = await client.send_code(phone)
+            try:
+                sent_code = await client.send_code(phone)
+            except Exception as e:
+                if '[406 PHONE_NUMBER_INVALID]' in str(e):
+                    await bot.send_message(message.from_user.id,
+                                           "Ошибка отправки кода. Проверьте корректность номера телефона. Попробуйте снова.")
+                    await state.clear()
+                else:
+                    await bot.send_message(message.from_user.id,
+                                           "Ошибка отправки кода. Попробуйте снова.")
+                    await state.clear()
+                return
             await state.update_data(client=client, sent_code=sent_code)
             await state.set_state(UserStates.waiting_for_code)
             await message.answer("Введите код подтверждения:", reply_markup=get_cancel_keyboard())
@@ -525,11 +536,27 @@ def process_data(data, start_date, end_date):
             "address_with_people": {},
         }
         report['summ_unique_requests_count'] += len(addresses)
+
+        # Сохранение дубликатов заказов за последние 2 часа по цене количеству человек
+        duplicate_dates = {}
         for address, orders in addresses.items():
             max_paid = 0
             for order in orders:
                 order_date = datetime.strptime(order["datetime"], "%Y.%m.%d %H:%M:%S")
                 if start_date <= order_date <= end_date:
+
+                    duplicate_key = f"{order['paid_amount']}_{order['body_count']}"
+                    if duplicate_key in duplicate_dates.keys():
+                        # Рассчитываем разницу
+                        difference = abs(order_date - duplicate_dates[duplicate_key])
+                        if difference > timedelta(hours=2):
+                            # Устанавливаем новое время
+                            duplicate_dates[duplicate_key] = order_date
+                        else:
+                            # Пропускаем заказ дубликат
+                            continue
+                    else:
+                        duplicate_dates[duplicate_key] = order_date
 
                     if address not in body_in_address:
                         body_in_address[address] = [order['body_count']]
@@ -538,11 +565,6 @@ def process_data(data, start_date, end_date):
                     # Подсчет уникальных цен по заявкам
                     max_paid = max(max_paid, order["paid_amount"])
 
-                    '''if order['paid_amount'] in address_in_price.keys():
-                        if address not in address_in_price[order['paid_amount']]:
-                            address_in_price[order['paid_amount']].append(address)
-                    else:
-                        address_in_price[order['paid_amount']] = [address]'''
             if max_paid in city_report['unique_requests_by_price']:
                 city_report['unique_requests_by_price'][max_paid] += 1
             else:
@@ -698,6 +720,7 @@ def get_report(report_type: str, chat_name):
         return "Отчёт пуст"
     end_date = now
     report = process_data(data, start_date, end_date)
+    print(report)
     report_text = generate_report(report)
     if report_text == "":
         return "Отчёт пуст"
