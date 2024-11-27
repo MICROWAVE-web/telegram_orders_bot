@@ -212,7 +212,7 @@ async def process_code(message: Message, state: FSMContext):
     if message.text == ACCESS_CODE:
         authorized_users.add(user_id)
         save_authorized_users(authorized_users)  # Сохраняем изменения
-        await message.answer("Авторизация успешна! Теперь вы можете пользоваться командами бота.")
+        await message.answer("Авторизация успешна! Теперь вы можете пользоваться командами бота.", reply_markup=start_keyboard())
         await state.clear()  # Сбрасываем состояние
     else:
         await message.answer("Неверный код. Попробуйте еще раз.", reply_markup=get_cancel_keyboard())
