@@ -212,7 +212,8 @@ async def process_code(message: Message, state: FSMContext):
     if message.text == ACCESS_CODE:
         authorized_users.add(user_id)
         save_authorized_users(authorized_users)  # Сохраняем изменения
-        await message.answer("Авторизация успешна! Теперь вы можете пользоваться командами бота.", reply_markup=start_keyboard())
+        await message.answer("Авторизация успешна! Теперь вы можете пользоваться командами бота.",
+                             reply_markup=start_keyboard())
         await state.clear()  # Сбрасываем состояние
     else:
         await message.answer("Неверный код. Попробуйте еще раз.", reply_markup=get_cancel_keyboard())
@@ -222,10 +223,10 @@ def start_keyboard():
     # Создаем кнопки для клавиатуры
     keyboard = types.ReplyKeyboardMarkup(
         keyboard=[
-            [types.KeyboardButton(text="/report")],
-            [types.KeyboardButton(text="/accounts")],
-            [types.KeyboardButton(text="/add_account")],
-            [types.KeyboardButton(text="/remove_account")],
+            [types.KeyboardButton(text="Отчёт")],
+            [types.KeyboardButton(text="Аккаунты")],
+            [types.KeyboardButton(text="Добавить аккаунт")],
+            [types.KeyboardButton(text="Удалить аккаунт")],
         ],
         resize_keyboard=True,
         one_time_keyboard=True
@@ -235,16 +236,16 @@ def start_keyboard():
 
 # Обработчик команды /start
 @dp.message(Command("start"))
-async def cmd_start(message: Message, state: FSMContext):
-    user_id = message.from_user.id
+async def cmd_start(call: CallbackQuery, state: FSMContext):
+    user_id = call.from_user.id
     if user_id not in authorized_users:
-        await message.answer("Введите код для доступа к боту:", reply_markup=get_cancel_keyboard())
+        await call.answer("Введите код для доступа к боту:", reply_markup=get_cancel_keyboard())
         await state.set_state(UserStates.waiting_for_access_code)  # Устанавливаем состояние ожидания кода
         return
     commands_text = """
 Привет! Я бот для мониторинга заявок. Вот список доступных команд:
 """
-    await message.answer(commands_text, reply_markup=start_keyboard())
+    await call.answer(commands_text, reply_markup=start_keyboard())
 
 
 def get_cancel_keyboard():
@@ -252,7 +253,7 @@ def get_cancel_keyboard():
 
 
 # Обработчик команды добавления аккаунта
-@dp.message(Command("add_account"))
+@dp.message(F.text == 'Добавить аккаунт')
 async def cmd_add_account(message: Message, state: FSMContext):
     user_id = message.from_user.id
     if user_id not in authorized_users:
@@ -414,8 +415,9 @@ async def process_code(message: Message, state: FSMContext):
     await state.clear()
 
 
-# Обработчик команды для удаления аккаунта
-@dp.message(Command("accounts"))
+# @dp.callback_query(F.data == 'accounts')
+# Обработчик команды аккаунта
+@dp.message(F.text == 'Аккаунты')
 async def cmd_get_accounts(message: Message, state: FSMContext):
     user_id = message.from_user.id
     if user_id not in authorized_users:
@@ -436,8 +438,9 @@ async def cmd_get_accounts(message: Message, state: FSMContext):
     await message.answer(text, parse_mode='HTML', reply_markup=start_keyboard())
 
 
+
 # Обработчик команды для удаления аккаунта
-@dp.message(Command("remove_account"))
+@dp.message(F.text == 'Удалить аккаунт')
 async def cmd_remove_account(message: Message, state: FSMContext):
     user_id = message.from_user.id
     if user_id not in authorized_users:
@@ -788,7 +791,8 @@ def get_chat_titles():
 
 
 # Обработчик начало получения отчета
-@dp.message(Command("report"))
+
+@dp.message(F.text == 'Отчёт')
 async def cmd_report(message: Message, state: FSMContext):
     user_id = message.from_user.id
     if user_id not in authorized_users:
