@@ -569,8 +569,9 @@ def process_data(data, start_date, end_date):
 
         # Сохранение дубликатов заказов за последние 2 часа по цене количеству человек
         # [(время, фраза начала), ...]
-        duplicate_dates = []
+        duplicate_dates = {}
         for address, orders in addresses.items():
+            duplicate_dates[address] = []
             max_paid = 0
             for order in orders:
                 order_date = datetime.strptime(order["datetime"], "%Y.%m.%d %H:%M:%S")
@@ -580,20 +581,24 @@ def process_data(data, start_date, end_date):
                         # Находим самый близкий по фразе заказ
                         best_match = process.extractOne(
                             order['start'],
-                            [i[1] for i in duplicate_dates]
+                            [i[1] for i in duplicate_dates[address]]
                         )
                         if best_match is not None:
                             match, similarity, _ = best_match
 
-                            match_data = list(filter(lambda x: x[1] == match, duplicate_dates))[0][0]
+                            match_element = list(filter(lambda x: x[1] == match, duplicate_dates[address]))[0]
+                            match_data = match_element[0]
+
                             # Рассчитываем разницу
                             difference = abs(order_date - match_data)
                             if similarity > 92 and difference < timedelta(hours=12):
+                                duplicate_dates[address].remove(match_element)
+                                duplicate_dates[address].append((order_date, order['start']))
                                 continue
                             else:
-                                duplicate_dates.append((order_date, order['start']))
+                                duplicate_dates[address].append((order_date, order['start']))
                         else:
-                            duplicate_dates.append((order_date, order['start']))
+                            duplicate_dates[address].append((order_date, order['start']))
 
                     if address not in body_in_address:
                         body_in_address[address] = [order['body_count']]
@@ -885,7 +890,6 @@ def get_report(report_type: str, chat_name):
         return "Отчёт пуст"
     end_date = now
     report = process_data(data, start_date, end_date)
-    print(report)
     report_text = generate_report(report)
     if report_text == "":
         return "Отчёт пуст"
