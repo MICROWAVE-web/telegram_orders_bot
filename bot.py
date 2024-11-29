@@ -554,12 +554,36 @@ async def handle_message(client: Client, message: Message):
             save_orders(orders)
 
 
+def sum_orders_from_all_cities():
+    summcities = {}
+    orders = load_orders()
+    for chat_id in orders.keys():
+        data = load_orders().get(chat_id, {}).get("streets", {})
+        for city, addresses in data.items():
+
+            # Слияние городов
+            if city in summcities.keys():
+                for address, orders in addresses.items():
+                    if address in summcities[city].keys():
+                        summcities[city][address] += orders
+
+                        # Сортируем по времени заказа
+                        summcities[city][address].sort(
+                            key=lambda order: datetime.strptime(order["datetime"], "%Y.%m.%d %H:%M:%S"))
+                    else:
+                        summcities[city][address] = orders
+            else:
+                summcities[city] = addresses
+    return summcities
+
+
 # Обработка данных
 def process_data(data, start_date, end_date):
     report = {
         'summ_unique_requests_count': 0
     }
     for city, addresses in data.items():
+        print(city)
         body_in_address = {}  # кол-во людей в заявках
         city_report = {
             "unique_requests_by_price": {},
@@ -574,6 +598,7 @@ def process_data(data, start_date, end_date):
             duplicate_dates[address] = []
             max_paid = 0
             for order in orders:
+                print(order)
                 order_date = datetime.strptime(order["datetime"], "%Y.%m.%d %H:%M:%S")
                 if start_date <= order_date <= end_date:
 
@@ -757,7 +782,8 @@ def generate_csv_report(chat_name: str, start_date: datetime, end_date: datetime
         if item['chat_name'] == chat_name:
             chat_id = key
             break
-    data = load_orders().get(chat_id, {}).get("streets", {})
+    #data = load_orders().get(chat_id, {}).get("streets", {})
+    data = sum_orders_from_all_cities()
     data = process_data(data, start_date, end_date)  # Загружаем данные заказов
     report_lines = []
 

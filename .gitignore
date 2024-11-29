@@ -6,3 +6,4 @@
 /.venv/
 /venv/
 /authorized_users.json
+/test.py
