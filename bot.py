@@ -583,7 +583,6 @@ def process_data(data, start_date, end_date):
         'summ_unique_requests_count': 0
     }
     for city, addresses in data.items():
-        print(city)
         body_in_address = {}  # кол-во людей в заявках
         city_report = {
             "unique_requests_by_price": {},
@@ -598,7 +597,6 @@ def process_data(data, start_date, end_date):
             duplicate_dates[address] = []
             max_paid = 0
             for order in orders:
-                print(order)
                 order_date = datetime.strptime(order["datetime"], "%Y.%m.%d %H:%M:%S")
                 if start_date <= order_date <= end_date:
 
