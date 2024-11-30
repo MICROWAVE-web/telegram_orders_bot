@@ -611,10 +611,10 @@ def process_data(data, start_date, end_date):
 
                             match_element = list(filter(lambda x: x[1] == match, duplicate_dates[address]))[0]
                             match_data = match_element[0]
-
+                            match_start = match_element[1]
                             # Рассчитываем разницу
                             difference = abs(order_date - match_data)
-                            if similarity > 92 and difference < timedelta(hours=12):
+                            if ('сегодня' in order['start'] and 'завтра' in match_start) or similarity > 92 and difference < timedelta(hours=12):
                                 duplicate_dates[address].remove(match_element)
                                 duplicate_dates[address].append((order_date, order['start']))
                                 continue
