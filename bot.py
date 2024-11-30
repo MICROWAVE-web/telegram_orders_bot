@@ -614,11 +614,15 @@ def process_data(data, start_date, end_date):
                             match_start = match_element[1]
                             # Рассчитываем разницу
                             difference = abs(order_date - match_data)
-                            if ('сегодня' in order['start'] and 'завтра' in match_start) or similarity > 92 and difference < timedelta(hours=12):
+                            if ('сегодня' in order['start'] and 'завтра' in match_start) or ('в_ближайшее_время' in order[
+                                'start'] and 'сегодня' in match_start) or similarity > 92 and difference < timedelta(
+                                    hours=12):
                                 duplicate_dates[address].remove(match_element)
                                 duplicate_dates[address].append((order_date, order['start']))
                                 continue
                             else:
+                                if 'Ленинский' in address:
+                                    print(match_data, match_start)
                                 duplicate_dates[address].append((order_date, order['start']))
                         else:
                             duplicate_dates[address].append((order_date, order['start']))
@@ -780,7 +784,7 @@ def generate_csv_report(chat_name: str, start_date: datetime, end_date: datetime
         if item['chat_name'] == chat_name:
             chat_id = key
             break
-    #data = load_orders().get(chat_id, {}).get("streets", {})
+    # data = load_orders().get(chat_id, {}).get("streets", {})
     data = sum_orders_from_all_cities()
     data = process_data(data, start_date, end_date)  # Загружаем данные заказов
     report_lines = []
