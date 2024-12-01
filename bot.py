@@ -557,10 +557,22 @@ async def handle_message(client: Client, message: Message):
 def sum_orders_from_all_cities():
     summcities = {}
     orders = load_orders()
-    for chat_id in orders.keys():
-        data = load_orders().get(chat_id, {}).get("streets", {})
-        for city, addresses in data.items():
+    for chat_id, item in orders.items():
+        chat_name = item.get("chat_name", "").lower()
+        city_type_name = ""
+        city_types = ['грузчики', 'разгрузчики', 'атлант', 'артель']
+        for city_type in city_types:
+            if city_type in chat_name:
+                if city_type_name == "":
+                    city_type_name += f"({city_type}"
+                else:
+                    city_type_name += f", {city_type}"
+        if city_type_name != "":
+            city_type_name += ")"
 
+        data = item.get("streets", {})
+        for city, addresses in data.items():
+            city = f"{city} {city_type_name}"
             # Слияние городов
             if city in summcities.keys():
                 for address, orders in addresses.items():
@@ -582,13 +594,13 @@ def process_data(data, start_date, end_date):
     report = {
         'summ_unique_requests_count': 0
     }
+    summ_uniq_orders = 0
     for city, addresses in data.items():
         body_in_address = {}  # кол-во людей в заявках
         city_report = {
             "unique_requests_by_price": {},
             "address_with_people": {},
         }
-        report['summ_unique_requests_count'] += len(addresses)
 
         # Сохранение дубликатов заказов за последние 2 часа по цене количеству человек
         # [(время, фраза начала), ...]
@@ -614,15 +626,15 @@ def process_data(data, start_date, end_date):
                             match_start = match_element[1]
                             # Рассчитываем разницу
                             difference = abs(order_date - match_data)
-                            if ('сегодня' in order['start'] and 'завтра' in match_start) or ('в_ближайшее_время' in order[
+                            if ('сегодня' in order['start'] and 'завтра' in match_start) or (
+                                    'в_ближайшее_время' in order[
                                 'start'] and 'сегодня' in match_start) or similarity > 92 and difference < timedelta(
-                                    hours=12):
+                                hours=12):
                                 duplicate_dates[address].remove(match_element)
                                 duplicate_dates[address].append((order_date, order['start']))
                                 continue
                             else:
-                                if 'Ленинский' in address:
-                                    print(match_data, match_start)
+
                                 duplicate_dates[address].append((order_date, order['start']))
                         else:
                             duplicate_dates[address].append((order_date, order['start']))
@@ -638,6 +650,9 @@ def process_data(data, start_date, end_date):
                 city_report['unique_requests_by_price'][max_paid] += 1
             else:
                 city_report['unique_requests_by_price'][max_paid] = 1
+
+        for _, count in city_report["unique_requests_by_price"].items():
+            summ_uniq_orders += count
 
         # считаем адреса с кол-вом заявок >= 8 или максимальным значением
         add_counter = 0
@@ -677,7 +692,7 @@ def process_data(data, start_date, end_date):
             sorted(city_report['address_with_people'].items(), key=lambda item: item[1], reverse=True))
         city_report['address_with_people'] = sorted_address_with_people
         report[city] = city_report
-
+    report['summ_unique_requests_count'] = summ_uniq_orders
     return report
 
 
@@ -775,6 +790,7 @@ async def process_end_date(message: Message, state: FSMContext):
 
         await state.clear()
     except ValueError:
+        traceback.print_exc()
         await message.answer("Неверный формат даты или дата некорректна. Попробуйте ещё раз.")
 
 
@@ -789,9 +805,11 @@ def generate_csv_report(chat_name: str, start_date: datetime, end_date: datetime
     data = process_data(data, start_date, end_date)  # Загружаем данные заказов
     report_lines = []
 
+    summ_unique_requests_count = 0
     # Обходим данные
     for city, city_data in data.items():
         if city == "summ_unique_requests_count":
+            summ_unique_requests_count = city_data
             continue  # Пропускаем это поле
         unique_requests_by_price = city_data.get("unique_requests_by_price", {})
         address_with_people = city_data.get("address_with_people", {})
@@ -813,6 +831,12 @@ def generate_csv_report(chat_name: str, start_date: datetime, end_date: datetime
                 "Значение": address,
                 "Количество": people_count
             })
+    report_lines.append({
+        "Город": '',
+        "Тип данных": "Общее количество",
+        "Значение": summ_unique_requests_count,
+        "Количество": '-'
+    })
 
     # Создаём CSV файл
     file_path = f"report_{chat_name.replace(' ', '')}_{start_date.strftime('%d%m%Y')}_{end_date.strftime('%d%m%Y')}.csv"
