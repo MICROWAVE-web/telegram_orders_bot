@@ -738,11 +738,12 @@ async def process_report_request(message: Message, state: FSMContext):
                 report_type = "week"
 
             # Запрашиваем тип отчёта
-            data = await state.get_data()
-
-            await bot.send_message(chat_id=message.from_user.id,
-                                   text=get_report(report_type, chat_name=data["choosed_chat_name"]),
-                                   reply_markup=start_keyboard())
+            info = get_report(report_type, chat_name=data["choosed_chat_name"])
+            if len(info) > 4096:
+                for x in range(0, len(info), 4096):
+                    await bot.send_message(message.chat.id, info[x:x + 4096], reply_markup=start_keyboard())
+            else:
+                await bot.send_message(message.chat.id, info, reply_markup=start_keyboard())
 
             await state.clear()
     except ValueError:
