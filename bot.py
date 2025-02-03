@@ -691,14 +691,20 @@ def process_data(data, start_date, end_date):
         sorted_address_with_people = dict(
             sorted(city_report['address_with_people'].items(), key=lambda item: item[1], reverse=True))
         city_report['address_with_people'] = sorted_address_with_people
+
+        """#Делаем сумму уникальных заявок на адреса
+        for address, people_count in sorted_address_with_people.items():
+            report['summ_unique_requests_count'] += people_count
+        print(report['summ_unique_requests_count'])"""
         report[city] = city_report
-    report['summ_unique_requests_count'] = summ_uniq_orders
+    # report['summ_unique_requests_count'] = summ_uniq_orders
     return report
 
 
 # Формирование отчета
 def generate_report(report):
     report_lines = []
+    summ_unique_requests_count = 0
     for city, info in report.items():
         if city == 'summ_unique_requests_count':
             continue
@@ -707,8 +713,10 @@ def generate_report(report):
             report_lines.append(f" - {price} р/час ({count} заявок)")
         for address, people in info["address_with_people"].items():
             report_lines.append(f"Адрес: {address} ({people} человек)")
+            summ_unique_requests_count += people
         report_lines.append("")
-    report_lines.append(f"Общее число заявок ({report['summ_unique_requests_count']})")
+    # report_lines.append(f"Общее число заявок ({report['summ_unique_requests_count']})")
+    report_lines.append(f"Общее число заявок ({summ_unique_requests_count})")
     return "\n".join(report_lines)
 
 
@@ -810,7 +818,7 @@ def generate_csv_report(chat_name: str, start_date: datetime, end_date: datetime
     # Обходим данные
     for city, city_data in data.items():
         if city == "summ_unique_requests_count":
-            summ_unique_requests_count = city_data
+            # summ_unique_requests_count = city_data
             continue  # Пропускаем это поле
         unique_requests_by_price = city_data.get("unique_requests_by_price", {})
         address_with_people = city_data.get("address_with_people", {})
@@ -832,6 +840,7 @@ def generate_csv_report(chat_name: str, start_date: datetime, end_date: datetime
                 "Значение": address,
                 "Количество": people_count
             })
+            summ_unique_requests_count += people_count
     report_lines.append({
         "Город": '',
         "Тип данных": "Общее количество",
