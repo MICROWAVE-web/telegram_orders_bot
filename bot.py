@@ -592,9 +592,9 @@ def sum_orders_from_all_cities():
 # Обработка данных
 def process_data(data, start_date, end_date):
     report = {
-        'summ_unique_requests_count': 0
+        #      'summ_unique_requests_count': 0
     }
-    summ_uniq_orders = 0
+    # summ_uniq_orders = 0
     for city, addresses in data.items():
         body_in_address = {}  # кол-во людей в заявках
         city_report = {
@@ -608,10 +608,11 @@ def process_data(data, start_date, end_date):
         for address, orders in addresses.items():
             duplicate_dates[address] = []
             max_paid = 0
+            atLeastOneOrder = False
             for order in orders:
                 order_date = datetime.strptime(order["datetime"], "%Y.%m.%d %H:%M:%S")
                 if start_date <= order_date <= end_date:
-
+                    atLeastOneOrder = True
                     if order.get("start") is not None:
                         # Находим самый близкий по фразе заказ
                         best_match = process.extractOne(
@@ -646,13 +647,14 @@ def process_data(data, start_date, end_date):
                     # Подсчет уникальных цен по заявкам
                     max_paid = max(max_paid, order["paid_amount"])
 
-            if max_paid in city_report['unique_requests_by_price']:
-                city_report['unique_requests_by_price'][max_paid] += 1
-            else:
-                city_report['unique_requests_by_price'][max_paid] = 1
+            if atLeastOneOrder:
+                if max_paid in city_report['unique_requests_by_price']:
+                    city_report['unique_requests_by_price'][max_paid] += 1
+                else:
+                    city_report['unique_requests_by_price'][max_paid] = 1
 
-        for _, count in city_report["unique_requests_by_price"].items():
-            summ_uniq_orders += count
+        # for _, count in city_report["unique_requests_by_price"].items():
+        #     summ_uniq_orders += count
 
         # считаем адреса с кол-вом заявок >= 8 или максимальным значением
         add_counter = 0
@@ -696,7 +698,8 @@ def process_data(data, start_date, end_date):
         for address, people_count in sorted_address_with_people.items():
             report['summ_unique_requests_count'] += people_count
         print(report['summ_unique_requests_count'])"""
-        report[city] = city_report
+        if len(city_report['unique_requests_by_price']) > 0 or len(city_report['address_with_people']) > 0:
+            report[city] = city_report
     # report['summ_unique_requests_count'] = summ_uniq_orders
     return report
 
