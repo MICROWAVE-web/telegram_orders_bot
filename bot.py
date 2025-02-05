@@ -526,6 +526,14 @@ async def handle_message(client: Client, message: Message):
                 await message.answer('✓')
             except Exception as e:
                 await message.answer(f'✗ {e}')
+
+        if message.reply_markup:  # Проверяем, есть ли inline-кнопки
+            for row in message.reply_markup.inline_keyboard:  # Перебираем кнопки
+                for button in row:
+                    if "разбудить" in button.text.lower():
+                        await message.click(button)  # Нажимаем кнопку
+                        print(f"Нажата кнопка для пробуждения бота. chat_id={str(message.from_user.id)}")
+
         parsed_data = parse_order_message(message.text)
         if parsed_data:
             orders = load_orders()
@@ -700,6 +708,7 @@ def process_data(data, start_date, end_date):
         print(report['summ_unique_requests_count'])"""
         if len(city_report['unique_requests_by_price']) > 0 or len(city_report['address_with_people']) > 0:
             report[city] = city_report
+        # report[city] = city_report
     # report['summ_unique_requests_count'] = summ_uniq_orders
     return report
 
@@ -814,7 +823,9 @@ def generate_csv_report(chat_name: str, start_date: datetime, end_date: datetime
             break
     # data = load_orders().get(chat_id, {}).get("streets", {})
     data = sum_orders_from_all_cities()
+    print(start_date, end_date)
     data = process_data(data, start_date, end_date)  # Загружаем данные заказов
+    print(data)
     report_lines = []
 
     summ_unique_requests_count = 0
@@ -954,7 +965,9 @@ def get_report(report_type: str, chat_name):
     else:
         return "Отчёт пуст"
     end_date = now
+    print(start_date, end_date)
     report = process_data(data, start_date, end_date)
+    print(report)
     report_text = generate_report(report)
     if report_text == "":
         return "Отчёт пуст"
